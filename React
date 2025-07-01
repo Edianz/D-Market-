@@ -1,0 +1,161 @@
+import React, { useEffect, useState } from 'react';
+import sanityClient from '@sanity/client';
+import emailjs from 'emailjs-com';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+
+const client = sanityClient({
+  projectId: 'YOUR_PROJECT_ID',
+  dataset: 'production',
+  useCdn: true,
+  apiVersion: '2023-12-01'
+});
+
+export default function DMarket() {
+  const [products, setProducts] = useState([]);
+  const [cart, setCart] = useState([]);
+  const [suggestion, setSuggestion] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      const data = await client.fetch(`*[_type == "product"]{_id, title, price, description, "image": image.asset->url}`);
+      setProducts(data);
+    };
+    fetchProducts();
+
+    const localAdmin = localStorage.getItem('dmarket_admin');
+    if (localAdmin === 'true') setIsAdmin(true);
+
+    const savedOrders = JSON.parse(localStorage.getItem('dmarket_orders')) || [];
+    setOrders(savedOrders);
+  }, []);
+
+  const addToCart = (product) => {
+    setCart([...cart, product]);
+  };
+
+  const getSuggestion = async () => {
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer YOUR_API_KEY`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'deepseek-reasoner',
+        messages: [
+          { role: 'user', content: 'Je cherche un produit populaire dans la communauté D-AGGLO' }
+        ]
+      })
+    });
+    const data = await response.json();
+    setSuggestion(data.choices[0].message.content);
+  };
+
+  const sendAdminEmail = () => {
+    const total = (cart.reduce((sum, p) => sum + p.price, 0) / 100).toFixed(2);
+    const content = cart.map(p => `${p.title} - ${(p.price / 100).toFixed(2)} €`).join('\n');
+
+    emailjs.send('service_id', 'template_id', {
+      to_name: 'Admin D-Market',
+      cart_details: content,
+      total: total
+    }, 'your_user_id');
+  };
+
+  const checkout = async () => {
+    sendAdminEmail();
+    const order = {
+      date: new Date().toLocaleString(),
+      items: cart,
+      total: cart.reduce((sum, p) => sum + p.price, 0) / 100
+    };
+    const allOrders = [...orders, order];
+    localStorage.setItem('dmarket_orders', JSON.stringify(allOrders));
+    setOrders(allOrders);
+
+    const response = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: cart })
+    });
+    const data = await response.json();
+    window.location.href = data.url;
+  };
+
+  const handleLogin = () => {
+    if (passwordInput === 'admin2025') {
+      localStorage.setItem('dmarket_admin', 'true');
+      setIsAdmin(true);
+    } else {
+      alert('Mot de passe incorrect');
+    }
+  };
+
+  const total = cart.reduce((acc, item) => acc + item.price, 0);
+
+  return (
+    <div className="p-4 space-y-6">
+      <h1 className="text-3xl font-bold text-center">🛍️ D-Market - Communauté D-AGGLO</h1>
+
+      {!isAdmin && (
+        <div className="bg-gray-100 p-4 rounded">
+          <h2 className="text-xl font-bold">🔐 Connexion Admin</h2>
+          <input type="password" placeholder="Mot de passe admin" value={passwordInput} onChange={e => setPasswordInput(e.target.value)} className="border p-2 rounded w-full my-2" />
+          <Button onClick={handleLogin}>Connexion</Button>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="bg-yellow-50 p-4 rounded border border-yellow-400">
+          <h2 className="text-xl font-bold mb-2">📊 Tableau de bord Admin</h2>
+          <p><strong>Produits :</strong> {products.length}</p>
+          <p><strong>Panier actuel :</strong> {cart.length} ({(total / 100).toFixed(2)} €)</p>
+          {suggestion && <p><strong>Suggestion IA :</strong> {suggestion}</p>}
+          <h3 className="text-lg font-semibold mt-4">📦 Historique des commandes</h3>
+          <ul className="list-disc ml-5 text-sm">
+            {orders.map((order, idx) => (
+              <li key={idx}><strong>{order.date}</strong> - {order.items.length} produits - Total : {order.total.toFixed(2)} €</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {products.map(product => (
+          <Card key={product._id}>
+            <CardContent className="p-4">
+              <img src={product.image} alt={product.title} className="w-full h-40 object-cover rounded mb-2" />
+              <h2 className="text-xl font-semibold">{product.title}</h2>
+              <p className="text-lg">{(product.price / 100).toFixed(2)} €</p>
+              <p className="text-sm text-gray-600 mb-2">{product.description}</p>
+              <Button onClick={() => addToCart(product)}>Ajouter au panier</Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div>
+        <h2 className="text-2xl font-semibold">🧠 Recommandation IA</h2>
+        <Button onClick={getSuggestion}>Obtenir une suggestion</Button>
+        {suggestion && <p className="mt-2 p-2 bg-gray-100 rounded">{suggestion}</p>}
+      </div>
+
+      <div>
+        <h2 className="text-2xl font-semibold">🛒 Panier ({cart.length})</h2>
+        <ul className="list-disc ml-5">
+          {cart.map((item, idx) => (
+            <li key={idx}>{item.title} - {(item.price / 100).toFixed(2)} €</li>
+          ))}
+        </ul>
+        {cart.length > 0 && <>
+          <p className="mt-2 font-bold">Total : {(total / 100).toFixed(2)} €</p>
+          <Button className="mt-4" onClick={checkout}>Payer avec Stripe</Button>
+        </>}
+      </div>
+    </div>
+  );
+}
