@@ -1,0 +1,10 @@
+<button
+  onClick={() => {
+    const existingCart = JSON.parse(localStorage.getItem("dmarket-cart")) || [];
+    existingCart.push({ id, name, price });
+    localStorage.setItem("dmarket-cart", JSON.stringify(existingCart));
+    alert(`${name} ajouté au panier !`);
+  }}
+>
+  Ajouter au panier
+</button>
